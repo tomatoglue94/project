@@ -19,10 +19,31 @@
     border-radius: 10px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
   }
+  #stage {
+    position: relative;
+  }
+  #reset-btn {
+    position: absolute;
+    right: 16px;
+    bottom: 16px;
+    font: bold 28px "Microsoft YaHei", "PingFang SC", sans-serif;
+    color: #ffffff;
+    background: #fb8c00;
+    border: none;
+    border-radius: 10px;
+    padding: 6px 14px;
+    cursor: pointer;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+  }
+  #reset-btn:hover { background: #f57c00; }
+  #reset-btn:active { transform: translateY(2px); box-shadow: 0 1px 5px rgba(0, 0, 0, 0.2); }
 </style>
 </head>
 <body>
-<canvas id="game" width="800" height="800"></canvas>
+<div id="stage">
+  <canvas id="game" width="800" height="800"></canvas>
+  <button id="reset-btn" type="button">重置</button>
+</div>
 <script>
 (function () {
   'use strict';
@@ -50,7 +71,10 @@
   let dir = 'right';      // 当前实际移动方向
   let nextDir = 'right';  // 下一次移动方向（按键立即生效）
   let food = null;        // 食物坐标 [x, y]
-  let score = 0;
+  let score = 0;         // 本局得分（每局从 0 开始）
+  let totalScore = 0;    // 累计得分（新一局不清零，仅「重置」按钮清零）
+  let highScore = 0;     // 最高分（单局最高分，新一局不清零）
+  let games = 0;         // 局数（新一局不清零）
   let timer = null;
 
   // ---------- 工具 ----------
@@ -87,7 +111,7 @@
     }
     dir = 'right';
     nextDir = 'right';
-    score = 0;
+    score = 0; // 仅清零本局得分，累计得分 / 最高分 / 局数保留
     spawnFood();
   }
 
@@ -144,7 +168,9 @@
     snake.unshift([nx, ny]);
 
     if (eating) {
-      score++; // 每吃掉 1 个食物固定 +1 分
+      score++;       // 本局得分 +1
+      totalScore++;  // 累计得分 +1（新一局不清零）
+      if (score > highScore) highScore = score; // 实时刷新最高分
       if (snake.length >= COLS * ROWS) {
         endGame(true); // 蛇完全占满全部地图网格 → 胜利通关
         return;
@@ -159,6 +185,7 @@
 
   function startGame() {
     state = STATE.PLAYING;
+    games++; // 每开始一局，局数 +1
     stopTimer();
     timer = setInterval(tick, TICK_MS);
     draw();
@@ -237,21 +264,21 @@
     } else if (state === STATE.OVER) {
       overlay();
       centerText('游戏结束', 330, 48, '#c62828', true);
-      centerText('最终分数：' + score, 400, 28, '#263238', false);
+      centerText('本局得分：' + score, 400, 28, '#263238', false);
       centerText('按空格键重新开始', 452, 20, '#607d8b', false);
     } else if (state === STATE.WIN) {
       overlay();
       centerText('胜利通关！', 330, 48, '#2e7d32', true);
-      centerText('最终分数：' + score, 400, 28, '#263238', false);
+      centerText('本局得分：' + score, 400, 28, '#263238', false);
       centerText('按空格键重新开始', 452, 20, '#607d8b', false);
     }
 
-    // 分数：实时展示在地图画布右上角（结束后保留最终分数）
+    // 计分板：得分 / 最高分 / 局数 从左到右紧贴平铺，位于地图（贪吃蛇活动区域）上边界上方
     ctx.fillStyle = '#263238';
     ctx.font = 'bold 28px ' + FONT;
-    ctx.textAlign = 'right';
+    ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText('分数：' + score, CANVAS_SIZE - 16, 44);
+    ctx.fillText('得分：' + totalScore + '  最高分：' + highScore + '  局数：' + games, OFFSET, 50);
   }
 
   // ---------- 键盘 ----------
@@ -287,6 +314,26 @@
   }
 
   window.addEventListener('keydown', onKeyDown);
+
+  // ---------- 「重置」按钮 ----------
+  const resetBtn = document.getElementById('reset-btn');
+
+  function resetAll() {
+    totalScore = 0;
+    highScore = 0;
+    games = 0;
+    if (state === STATE.PLAYING) {
+      restartGame(); // 游戏中点击：清零记录并重新开始本局
+    } else {
+      resetGame();   // 欢迎 / 结束界面点击：清零记录并复位棋盘
+      draw();
+    }
+  }
+
+  resetBtn.addEventListener('click', function () {
+    resetAll();
+    this.blur(); // 点击后移除焦点，避免之后按空格键误触发按钮
+  });
 
   // ---------- 初始化 ----------
   resetGame();
