@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ClaudeSnake 贪吃蛇</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #eceff1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  canvas {
+    display: block;
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+  }
+</style>
+</head>
+<body>
+<canvas id="game" width="800" height="800"></canvas>
+<script>
+(function () {
+  'use strict';
+
+  // ---------- 常量 ----------
+  const COLS = 20;                // 地图列数
+  const ROWS = 20;                // 地图行数
+  const CELL_SIZE = 30;           // 单格尺寸（px）
+  const CANVAS_SIZE = 800;        // 画布整体尺寸（px）
+  const TICK_MS = 200;            // 固定 200ms 每帧，全程速度不变
+  const GRID_SIZE = COLS * CELL_SIZE;              // 地图 600px
+  const OFFSET = (CANVAS_SIZE - GRID_SIZE) / 2;    // 地图在画布中居中，偏移 100px
+
+  const STATE = { WELCOME: 'welcome', PLAYING: 'playing', OVER: 'over', WIN: 'win' };
+  const DIRS = { w: 'up', s: 'down', a: 'left', d: 'right' };
+  const OPPOSITE = { up: 'down', down: 'up', left: 'right', right: 'left' };
+  const FONT = '"Microsoft YaHei", "PingFang SC", sans-serif';
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  // ---------- 游戏状态 ----------
+  let state = STATE.WELCOME;
+  let snake = [];         // 蛇身坐标 [x, y]，第 0 项是蛇头
+  let dir = 'right';      // 当前实际移动方向
+  let nextDir = 'right';  // 下一次移动方向（按键立即生效）
+  let food = null;        // 食物坐标 [x, y]
+  let score = 0;
+  let timer = null;
+
+  // ---------- 工具 ----------
+  function cellRect(c) {
+    return [OFFSET + c[0] * CELL_SIZE, OFFSET + c[1] * CELL_SIZE, CELL_SIZE, CELL_SIZE];
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function stopTimer() {
+    if (timer !== null) {
+      clearInterval(timer);
+      timer = null;
+    }
+  }
+
+  // ---------- 游戏逻辑 ----------
+  function resetGame() {
+    const cx = Math.floor(COLS / 2);
+    const cy = Math.floor(ROWS / 2);
+    snake = [];
+    // 蛇头出生在地图中间，初始长度 4，默认朝右
+    for (let i = 0; i < 4; i++) {
+      snake.push([cx - i, cy]);
+    }
+    dir = 'right';
+    nextDir = 'right';
+    score = 0;
+    spawnFood();
+  }
+
+  // 生成食物：遍历所有空格子随机选取，保证不出现在蛇身坐标上
+  function spawnFood() {
+    const occupied = new Set(snake.map(s => s[0] + ',' + s[1]));
+    const free = [];
+    for (let x = 0; x < COLS; x++) {
+      for (let y = 0; y < ROWS; y++) {
+        if (!occupied.has(x + ',' + y)) free.push([x, y]);
+      }
+    }
+    if (free.length === 0) return false;
+    food = free[Math.floor(Math.random() * free.length)];
+    return true;
+  }
+
+  function endGame(win) {
+    state = win ? STATE.WIN : STATE.OVER;
+    stopTimer();
+    draw(); // 不输出死亡原因，分数保留
+  }
+
+  function tick() {
+    if (state !== STATE.PLAYING) return;
+
+    dir = nextDir;
+    const head = snake[0];
+    let nx = head[0];
+    let ny = head[1];
+    if (dir === 'right') nx++;
+    else if (dir === 'left') nx--;
+    else if (dir === 'up') ny--;
+    else if (dir === 'down') ny++;
+
+    // 1. 撞击画布墙壁边界 → 结束
+    if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) {
+      endGame(false);
+      return;
+    }
+
+    const eating = food !== null && nx === food[0] && ny === food[1];
+
+    // 2. 蛇头碰撞自身蛇身 → 结束
+    //    （未吃到食物时蛇尾本帧会移开，不算碰撞）
+    const body = eating ? snake : snake.slice(0, -1);
+    for (const seg of body) {
+      if (seg[0] === nx && seg[1] === ny) {
+        endGame(false);
+        return;
+      }
+    }
+
+    snake.unshift([nx, ny]);
+
+    if (eating) {
+      score++; // 每吃掉 1 个食物固定 +1 分
+      if (snake.length >= COLS * ROWS) {
+        endGame(true); // 蛇完全占满全部地图网格 → 胜利通关
+        return;
+      }
+      spawnFood(); // 吃掉食物后立刻重新生成合法位置的食物
+    } else {
+      snake.pop();
+    }
+
+    draw();
+  }
+
+  function startGame() {
+    state = STATE.PLAYING;
+    stopTimer();
+    timer = setInterval(tick, TICK_MS);
+    draw();
+  }
+
+  function restartGame() {
+    resetGame();
+    startGame();
+  }
+
+  // ---------- 绘制 ----------
+  function overlay() {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
+    ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+  }
+
+  function centerText(text, y, size, color, bold) {
+    ctx.fillStyle = color;
+    ctx.font = (bold ? 'bold ' : '') + size + 'px ' + FONT;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, CANVAS_SIZE / 2, y);
+  }
+
+  function draw() {
+    // 画布背景：纯白色
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+    // 网格线
+    ctx.strokeStyle = '#e3e6e8';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 0; i <= COLS; i++) {
+      const x = OFFSET + i * CELL_SIZE;
+      ctx.moveTo(x, OFFSET);
+      ctx.lineTo(x, OFFSET + GRID_SIZE);
+    }
+    for (let j = 0; j <= ROWS; j++) {
+      const y = OFFSET + j * CELL_SIZE;
+      ctx.moveTo(OFFSET, y);
+      ctx.lineTo(OFFSET + GRID_SIZE, y);
+    }
+    ctx.stroke();
+
+    // 地图外边框
+    ctx.strokeStyle = '#90a4ae';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(OFFSET, OFFSET, GRID_SIZE, GRID_SIZE);
+
+    // 食物：蓝色，30×30px，占满完整格子
+    if (food !== null) {
+      const [fx, fy] = cellRect(food);
+      ctx.fillStyle = '#1e88e5';
+      ctx.fillRect(fx, fy, CELL_SIZE, CELL_SIZE);
+    }
+
+    // 蛇身：橙色，30×30px，3px 圆角
+    ctx.fillStyle = '#fb8c00';
+    for (let i = snake.length - 1; i >= 1; i--) {
+      const [bx, by] = cellRect(snake[i]);
+      roundRect(bx, by, CELL_SIZE, CELL_SIZE, 3);
+    }
+
+    // 蛇头：红色，30×30px，与蛇身尺寸一致，小圆角
+    const [hx, hy] = cellRect(snake[0]);
+    ctx.fillStyle = '#e53935';
+    roundRect(hx, hy, CELL_SIZE, CELL_SIZE, 3);
+
+    // 覆盖层：欢迎 / 结束 / 胜利
+    if (state === STATE.WELCOME) {
+      overlay();
+      centerText('贪吃蛇', 330, 52, '#263238', true);
+      centerText('按下空格键启动游戏', 405, 24, '#263238', false);
+      centerText('W A S D 控制方向 · P 结束游戏', 452, 18, '#607d8b', false);
+    } else if (state === STATE.OVER) {
+      overlay();
+      centerText('游戏结束', 330, 48, '#c62828', true);
+      centerText('最终分数：' + score, 400, 28, '#263238', false);
+      centerText('按空格键重新开始', 452, 20, '#607d8b', false);
+    } else if (state === STATE.WIN) {
+      overlay();
+      centerText('胜利通关！', 330, 48, '#2e7d32', true);
+      centerText('最终分数：' + score, 400, 28, '#263238', false);
+      centerText('按空格键重新开始', 452, 20, '#607d8b', false);
+    }
+
+    // 分数：实时展示在地图画布右上角（结束后保留最终分数）
+    ctx.fillStyle = '#263238';
+    ctx.font = 'bold 28px ' + FONT;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('分数：' + score, CANVAS_SIZE - 16, 44);
+  }
+
+  // ---------- 键盘 ----------
+  function onKeyDown(e) {
+    let key = e.key;
+    if (key === ' ') {
+      e.preventDefault(); // 阻止空格滚动页面
+      key = 'space';
+    }
+    key = key.toLowerCase();
+
+    if (state === STATE.WELCOME) {
+      if (key === 'space') startGame(); // 按下空格键启动游戏，启动前蛇不移动
+      return;
+    }
+
+    if (state === STATE.OVER || state === STATE.WIN) {
+      // 游戏结束后 WASD / P 均不响应，仅响应重开按键（空格）
+      if (key === 'space') restartGame();
+      return;
+    }
+
+    // 游戏中
+    if (DIRS.hasOwnProperty(key)) {
+      const want = DIRS[key];
+      // 以当前实际移动方向判断：禁止 180° 反向掉头，反向输入直接忽略
+      if (want !== OPPOSITE[dir]) {
+        nextDir = want; // 按下按键立即生效转向，无需回车确认
+      }
+    } else if (key === 'p') {
+      endGame(false); // 按下 P 键手动结束本局
+    }
+  }
+
+  window.addEventListener('keydown', onKeyDown);
+
+  // ---------- 初始化 ----------
+  resetGame();
+  draw();
+})();
+</script>
+</body>
+</html>
