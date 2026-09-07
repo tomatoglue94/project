@@ -22,10 +22,7 @@
   #stage {
     position: relative;
   }
-  #reset-btn {
-    position: absolute;
-    right: 16px;
-    bottom: 16px;
+  .snake-btn {
     font: bold 28px "Microsoft YaHei", "PingFang SC", sans-serif;
     color: #ffffff;
     background: #fb8c00;
@@ -35,14 +32,33 @@
     cursor: pointer;
     box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
   }
-  #reset-btn:hover { background: #f57c00; }
-  #reset-btn:active { transform: translateY(2px); box-shadow: 0 1px 5px rgba(0, 0, 0, 0.2); }
+  .snake-btn:hover { background: #f57c00; }
+  .snake-btn:active { transform: translateY(2px); box-shadow: 0 1px 5px rgba(0, 0, 0, 0.2); }
+  #reset-btn {
+    position: absolute;
+    right: 16px;
+    bottom: 16px;
+  }
+  /* 模式选择按钮：位于 WASD 提示文字下方，仅非游戏状态显示 */
+  #mode-box {
+    position: absolute;
+    left: 50%;
+    top: 480px;
+    transform: translateX(-50%);
+    display: none;
+    gap: 16px;
+  }
+  #mode-box.show { display: flex; }
 </style>
 </head>
 <body>
 <div id="stage">
   <canvas id="game" width="800" height="800"></canvas>
-  <button id="reset-btn" type="button">重置</button>
+  <button id="reset-btn" class="snake-btn" type="button">重置</button>
+  <div id="mode-box">
+    <button id="solo-btn" class="snake-btn" type="button">独自游玩</button>
+    <button id="ai-btn" class="snake-btn" type="button">AI游玩</button>
+  </div>
 </div>
 <script>
 (function () {
@@ -76,6 +92,7 @@
   let highScore = 0;     // 最高分（单局最高分，新一局不清零）
   let games = 0;         // 局数（新一局不清零）
   let timer = null;
+  let mode = 'solo';   // 操控模式：'solo' = WASD 人工操控，'ai' = AI 全权操控
 
   // ---------- 工具 ----------
   function cellRect(c) {
@@ -135,8 +152,73 @@
     draw(); // 不输出死亡原因，分数保留
   }
 
+  // ---------- AI ----------
+  // 每帧用 BFS 从蛇头出发搜索到食物的最短可行路径（蛇身与墙壁视为不可通行障碍），
+  // 取路径第一步作为下一步方向；无路径时选安全方向续命，四面堵死返回 null。
+  function aiDecide() {
+    const head = snake[0];
+    const startKey = head[0] + ',' + head[1];
+    const targetKey = food[0] + ',' + food[1];
+    const blocked = new Set(snake.map(s => s[0] + ',' + s[1])); // 整个蛇身均为障碍
+
+    const prev = {};                 // key -> 前驱 key，用于回溯最短路径
+    const visited = new Set([startKey]);
+    const queue = [head];
+    while (queue.length > 0) {
+      const [x, y] = queue.shift();
+      if (x === food[0] && y === food[1]) break; // 到达食物，结束搜索
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue; // 墙壁不可通行
+        const key = nx + ',' + ny;
+        if (visited.has(key) || blocked.has(key)) continue;
+        visited.add(key);
+        prev[key] = x + ',' + y;
+        queue.push([nx, ny]);
+      }
+    }
+
+    if (visited.has(targetKey)) {
+      // 从食物沿前驱回溯到「蛇头的下一步」格子
+      let step = targetKey;
+      while (prev[step] !== startKey) step = prev[step];
+      const [sx, sy] = step.split(',').map(Number);
+      if (sx > head[0]) return 'right';
+      if (sx < head[0]) return 'left';
+      if (sy > head[1]) return 'down';
+      return 'up';
+    }
+
+    // 无路到达食物：优先保持当前方向，其次选任意安全方向续命
+    // （本帧蛇尾会移开，蛇尾所在格子视为安全）
+    const safeBody = new Set(snake.slice(0, -1).map(s => s[0] + ',' + s[1]));
+    const order = [dir];
+    for (const d of ['up', 'down', 'left', 'right']) {
+      if (d !== dir) order.push(d);
+    }
+    for (const d of order) {
+      const nx = head[0] + (d === 'right' ? 1 : d === 'left' ? -1 : 0);
+      const ny = head[1] + (d === 'down' ? 1 : d === 'up' ? -1 : 0);
+      if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
+      if (safeBody.has(nx + ',' + ny)) continue;
+      return d;
+    }
+    return null; // 四面八方都被堵死
+  }
+
   function tick() {
     if (state !== STATE.PLAYING) return;
+
+    // AI 模式：每帧由 BFS 决定下一步方向，WASD 输入被忽略
+    if (mode === 'ai') {
+      const aiDir = aiDecide();
+      if (aiDir === null) {
+        endGame(false);
+        return;
+      }
+      nextDir = aiDir;
+    }
 
     dir = nextDir;
     const head = snake[0];
@@ -183,7 +265,8 @@
     draw();
   }
 
-  function startGame() {
+  function startGame(m) {
+    if (m === 'solo' || m === 'ai') mode = m; // 不传模式则沿用当前模式（如「重置」按钮重开）
     state = STATE.PLAYING;
     games++; // 每开始一局，局数 +1
     stopTimer();
@@ -191,9 +274,9 @@
     draw();
   }
 
-  function restartGame() {
+  function restartGame(m) {
     resetGame();
-    startGame();
+    startGame(m);
   }
 
   // ---------- 绘制 ----------
@@ -211,6 +294,9 @@
   }
 
   function draw() {
+    // 模式选择按钮仅在非游戏状态（欢迎 / 结束 / 胜利界面）显示
+    modeBox.classList.toggle('show', state !== STATE.PLAYING);
+
     // 画布背景：纯白色
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
@@ -259,18 +345,18 @@
     if (state === STATE.WELCOME) {
       overlay();
       centerText('贪吃蛇', 330, 52, '#263238', true);
-      centerText('按下空格键启动游戏', 405, 24, '#263238', false);
+      centerText('点击下方按钮开始游戏', 405, 24, '#263238', false);
       centerText('W A S D 控制方向 · P 结束游戏', 452, 18, '#607d8b', false);
     } else if (state === STATE.OVER) {
       overlay();
       centerText('游戏结束', 330, 48, '#c62828', true);
       centerText('本局得分：' + score, 400, 28, '#263238', false);
-      centerText('按空格键重新开始', 452, 20, '#607d8b', false);
+      centerText('点击下方按钮重新开始', 452, 20, '#607d8b', false);
     } else if (state === STATE.WIN) {
       overlay();
       centerText('胜利通关！', 330, 48, '#2e7d32', true);
       centerText('本局得分：' + score, 400, 28, '#263238', false);
-      centerText('按空格键重新开始', 452, 20, '#607d8b', false);
+      centerText('点击下方按钮重新开始', 452, 20, '#607d8b', false);
     }
 
     // 计分板：得分 / 最高分 / 局数 从左到右紧贴平铺，位于地图（贪吃蛇活动区域）上边界上方
@@ -283,33 +369,17 @@
 
   // ---------- 键盘 ----------
   function onKeyDown(e) {
-    let key = e.key;
-    if (key === ' ') {
-      e.preventDefault(); // 阻止空格滚动页面
-      key = 'space';
-    }
-    key = key.toLowerCase();
+    if (state !== STATE.PLAYING) return; // 开始 / 重新开局均由模式按钮完成，空格键已移除
 
-    if (state === STATE.WELCOME) {
-      if (key === 'space') startGame(); // 按下空格键启动游戏，启动前蛇不移动
-      return;
-    }
-
-    if (state === STATE.OVER || state === STATE.WIN) {
-      // 游戏结束后 WASD / P 均不响应，仅响应重开按键（空格）
-      if (key === 'space') restartGame();
-      return;
-    }
-
-    // 游戏中
-    if (DIRS.hasOwnProperty(key)) {
+    const key = e.key.toLowerCase();
+    if (mode === 'solo' && DIRS.hasOwnProperty(key)) {
       const want = DIRS[key];
       // 以当前实际移动方向判断：禁止 180° 反向掉头，反向输入直接忽略
       if (want !== OPPOSITE[dir]) {
         nextDir = want; // 按下按键立即生效转向，无需回车确认
       }
     } else if (key === 'p') {
-      endGame(false); // 按下 P 键手动结束本局
+      endGame(false); // 按下 P 键手动结束本局（独自 / AI 模式均生效）
     }
   }
 
@@ -332,7 +402,23 @@
 
   resetBtn.addEventListener('click', function () {
     resetAll();
-    this.blur(); // 点击后移除焦点，避免之后按空格键误触发按钮
+    this.blur(); // 点击后移除焦点，避免之后按回车 / 空格误触发按钮
+  });
+
+  // ---------- 「独自游玩」/「AI游玩」按钮 ----------
+  // 仅在欢迎 / 结束 / 胜利界面显示，点击即以对应模式开始新一局
+  const modeBox = document.getElementById('mode-box');
+  const soloBtn = document.getElementById('solo-btn');
+  const aiBtn = document.getElementById('ai-btn');
+
+  soloBtn.addEventListener('click', function () {
+    restartGame('solo');
+    this.blur();
+  });
+
+  aiBtn.addEventListener('click', function () {
+    restartGame('ai');
+    this.blur();
   });
 
   // ---------- 初始化 ----------
