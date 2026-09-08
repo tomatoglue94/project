@@ -46,9 +46,20 @@
     top: 480px;
     transform: translateX(-50%);
     display: none;
+    flex-direction: column;
+    align-items: center;
     gap: 16px;
   }
   #mode-box.show { display: flex; }
+  /* 上行：模式按钮；下行：配色风格按钮 */
+  #mode-row, #style-row {
+    display: flex;
+    gap: 16px;
+  }
+  /* 当前配色风格的激活标记（仅新增类，不修改 .snake-btn 本身） */
+  .snake-btn.active {
+    box-shadow: 0 0 0 3px #ffffff, 0 0 0 6px #263238, 0 3px 10px rgba(0, 0, 0, 0.2);
+  }
 </style>
 </head>
 <body>
@@ -56,8 +67,14 @@
   <canvas id="game" width="800" height="800"></canvas>
   <button id="reset-btn" class="snake-btn" type="button">重置</button>
   <div id="mode-box">
-    <button id="solo-btn" class="snake-btn" type="button">独自游玩</button>
-    <button id="ai-btn" class="snake-btn" type="button">AI游玩</button>
+    <div id="mode-row">
+      <button id="solo-btn" class="snake-btn" type="button">独自游玩</button>
+      <button id="ai-btn" class="snake-btn" type="button">AI游玩</button>
+    </div>
+    <div id="style-row">
+      <button id="style-green-btn" class="snake-btn" type="button">磷光绿</button>
+      <button id="style-neon-btn" class="snake-btn" type="button">霓虹风</button>
+    </div>
   </div>
 </div>
 <script>
@@ -78,6 +95,53 @@
   const OPPOSITE = { up: 'down', down: 'up', left: 'right', right: 'left' };
   const FONT = '"Microsoft YaHei", "PingFang SC", sans-serif';
 
+  // ---------- 配色主题 ----------
+  // 两套主题共用同一套绘制逻辑，只有颜色不同；默认 phosphor green。
+  const THEMES = {
+    // 磷光绿 CRT：深墨绿底 + 单色磷光绿，网格刻意压低对比
+    green: {
+      canvasBg: '#08120C',                 // 画布底色
+      grid: 'rgba(61, 255, 158, 0.12)',    // 网格线
+      gridGlow: null,                      // 网格辉光（磷光绿不加）
+      border: '#1E4634',                   // 地图外框
+      snake: '#3DFF9E',                    // 蛇身（靠近头部一端）
+      snakeTail: '#1E9E63',                // 蛇身（尾部渐变终点）
+      head: '#B4FFD9',                     // 蛇头
+      food: '#FF5A5F',                     // 食物
+      glow: 'rgba(61, 255, 158, 0.25)',    // 蛇身 / 蛇头辉光
+      foodGlow: 'rgba(255, 90, 95, 0.50)', // 食物辉光
+      hud: '#7FFFC4',                      // 计分文字
+      overlay: 'rgba(8, 18, 12, 0.88)',    // 欢迎 / 结束 / 胜利覆盖层
+      title: '#B4FFD9',                    // 欢迎标题
+      over: '#FF5A5F',                     // 「游戏结束」标题
+      win: '#3DFF9E',                      // 「胜利通关」标题
+      text: '#C9FFE2',                     // 覆盖层正文
+      textDim: '#6FC79A'                   // 覆盖层次要文字
+    },
+    // 霓虹风（蒸汽波）：深紫罗兰底 + 发光青色网格 + 品红蛇身
+    neon: {
+      canvasBg: '#16082B',
+      grid: 'rgba(92, 225, 230, 0.22)',
+      gridGlow: 'rgba(92, 225, 230, 0.55)', // 网格主动发光，是这套风格的核心
+      border: '#FF4FD8',
+      snake: '#FF5FD9',
+      snakeTail: '#8A3FD1',
+      head: '#FFE3FB',
+      food: '#5CE1E6',
+      glow: 'rgba(255, 95, 217, 0.35)',
+      foodGlow: 'rgba(92, 225, 230, 0.50)',
+      hud: '#FFD86B',
+      overlay: 'rgba(22, 8, 43, 0.88)',
+      title: '#FFE3FB',
+      over: '#FF5A5F',
+      win: '#5CE1E6',
+      text: '#FFE3FB',
+      textDim: '#B98FD9'
+    }
+  };
+  const GLOW_BLUR = 12;   // 蛇身 / 蛇头辉光半径
+  const GRID_BLUR = 6;    // 网格线辉光半径（仅霓虹风）
+
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
 
@@ -93,6 +157,7 @@
   let games = 0;         // 局数（新一局不清零）
   let timer = null;
   let mode = 'solo';   // 操控模式：'solo' = WASD 人工操控，'ai' = AI 全权操控
+  let themeName = 'green'; // 当前配色主题：'green' = 磷光绿（默认），'neon' = 霓虹风
 
   // ---------- 工具 ----------
   function cellRect(c) {
@@ -108,6 +173,16 @@
     ctx.arcTo(x, y, x + w, y, r);
     ctx.closePath();
     ctx.fill();
+  }
+
+  // 十六进制颜色线性插值，用于蛇身「头亮尾暗」的渐变
+  function mixColor(a, b, t) {
+    const ca = parseInt(a.slice(1), 16);
+    const cb = parseInt(b.slice(1), 16);
+    const r = Math.round((ca >> 16 & 255) + ((cb >> 16 & 255) - (ca >> 16 & 255)) * t);
+    const g = Math.round((ca >> 8 & 255) + ((cb >> 8 & 255) - (ca >> 8 & 255)) * t);
+    const bl = Math.round((ca & 255) + ((cb & 255) - (ca & 255)) * t);
+    return 'rgb(' + r + ',' + g + ',' + bl + ')';
   }
 
   function stopTimer() {
@@ -280,8 +355,8 @@
   }
 
   // ---------- 绘制 ----------
-  function overlay() {
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
+  function overlay(theme) {
+    ctx.fillStyle = theme.overlay;
     ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
   }
 
@@ -294,15 +369,21 @@
   }
 
   function draw() {
+    const theme = THEMES[themeName];
+
     // 模式选择按钮仅在非游戏状态（欢迎 / 结束 / 胜利界面）显示
     modeBox.classList.toggle('show', state !== STATE.PLAYING);
 
-    // 画布背景：纯白色
-    ctx.fillStyle = '#ffffff';
+    // 画布背景
+    ctx.fillStyle = theme.canvasBg;
     ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
-    // 网格线
-    ctx.strokeStyle = '#e3e6e8';
+    // 网格线（霓虹风的网格主动发光，是该风格的核心符号）
+    if (theme.gridGlow) {
+      ctx.shadowColor = theme.gridGlow;
+      ctx.shadowBlur = GRID_BLUR;
+    }
+    ctx.strokeStyle = theme.grid;
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let i = 0; i <= COLS; i++) {
@@ -316,51 +397,63 @@
       ctx.lineTo(OFFSET + GRID_SIZE, y);
     }
     ctx.stroke();
+    ctx.shadowBlur = 0;
 
     // 地图外边框
-    ctx.strokeStyle = '#90a4ae';
+    ctx.strokeStyle = theme.border;
     ctx.lineWidth = 2;
     ctx.strokeRect(OFFSET, OFFSET, GRID_SIZE, GRID_SIZE);
 
-    // 食物：蓝色，30×30px，占满完整格子
+    // 食物：30×30px，占满完整格子
     if (food !== null) {
       const [fx, fy] = cellRect(food);
-      ctx.fillStyle = '#1e88e5';
+      ctx.fillStyle = theme.food;
+      ctx.shadowColor = theme.foodGlow;
+      ctx.shadowBlur = 16;
       ctx.fillRect(fx, fy, CELL_SIZE, CELL_SIZE);
+      ctx.shadowBlur = 0;
     }
 
-    // 蛇身：橙色，30×30px，3px 圆角
-    ctx.fillStyle = '#fb8c00';
-    for (let i = snake.length - 1; i >= 1; i--) {
+    // 蛇身：30×30px，3px 圆角，由头到尾从亮渐暗
+    const bodyCount = snake.length - 1;
+    for (let i = bodyCount; i >= 1; i--) {
       const [bx, by] = cellRect(snake[i]);
+      const t = bodyCount > 1 ? (i - 1) / (bodyCount - 1) : 0;
+      ctx.fillStyle = mixColor(theme.snake, theme.snakeTail, t);
+      ctx.shadowColor = theme.glow;
+      ctx.shadowBlur = GLOW_BLUR;
       roundRect(bx, by, CELL_SIZE, CELL_SIZE, 3);
     }
+    ctx.shadowBlur = 0;
 
-    // 蛇头：红色，30×30px，与蛇身尺寸一致，小圆角
+    // 蛇头：与蛇身尺寸一致，小圆角
     const [hx, hy] = cellRect(snake[0]);
-    ctx.fillStyle = '#e53935';
+    ctx.fillStyle = theme.head;
+    ctx.shadowColor = theme.glow;
+    ctx.shadowBlur = GLOW_BLUR;
     roundRect(hx, hy, CELL_SIZE, CELL_SIZE, 3);
+    ctx.shadowBlur = 0;
 
     // 覆盖层：欢迎 / 结束 / 胜利
     if (state === STATE.WELCOME) {
-      overlay();
-      centerText('贪吃蛇', 330, 52, '#263238', true);
-      centerText('点击下方按钮开始游戏', 405, 24, '#263238', false);
-      centerText('W A S D 控制方向 · P 结束游戏', 452, 18, '#607d8b', false);
+      overlay(theme);
+      centerText('贪吃蛇', 330, 52, theme.title, true);
+      centerText('点击下方按钮开始游戏', 405, 24, theme.text, false);
+      centerText('W A S D 控制方向 · P 结束游戏', 452, 18, theme.textDim, false);
     } else if (state === STATE.OVER) {
-      overlay();
-      centerText('游戏结束', 330, 48, '#c62828', true);
-      centerText('本局得分：' + score, 400, 28, '#263238', false);
-      centerText('点击下方按钮重新开始', 452, 20, '#607d8b', false);
+      overlay(theme);
+      centerText('游戏结束', 330, 48, theme.over, true);
+      centerText('本局得分：' + score, 400, 28, theme.text, false);
+      centerText('点击下方按钮重新开始', 452, 20, theme.textDim, false);
     } else if (state === STATE.WIN) {
-      overlay();
-      centerText('胜利通关！', 330, 48, '#2e7d32', true);
-      centerText('本局得分：' + score, 400, 28, '#263238', false);
-      centerText('点击下方按钮重新开始', 452, 20, '#607d8b', false);
+      overlay(theme);
+      centerText('胜利通关！', 330, 48, theme.win, true);
+      centerText('本局得分：' + score, 400, 28, theme.text, false);
+      centerText('点击下方按钮重新开始', 452, 20, theme.textDim, false);
     }
 
     // 计分板：得分 / 最高分 / 局数 从左到右紧贴平铺，位于地图（贪吃蛇活动区域）上边界上方
-    ctx.fillStyle = '#263238';
+    ctx.fillStyle = theme.hud;
     ctx.font = 'bold 28px ' + FONT;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
@@ -421,7 +514,35 @@
     this.blur();
   });
 
+  // ---------- 「磷光绿」/「霓虹风」风格按钮 ----------
+  // 与模式按钮同容器，因此同样只在非游戏状态显示；切换后立即重绘当前画面
+  const greenBtn = document.getElementById('style-green-btn');
+  const neonBtn = document.getElementById('style-neon-btn');
+
+  function syncThemeButtons() {
+    greenBtn.classList.toggle('active', themeName === 'green');
+    neonBtn.classList.toggle('active', themeName === 'neon');
+  }
+
+  function setTheme(name) {
+    if (name === themeName) return; // 已经是该风格：不响应，也不重绘
+    themeName = name;
+    syncThemeButtons();
+    draw();
+  }
+
+  greenBtn.addEventListener('click', function () {
+    setTheme('green');
+    this.blur();
+  });
+
+  neonBtn.addEventListener('click', function () {
+    setTheme('neon');
+    this.blur();
+  });
+
   // ---------- 初始化 ----------
+  syncThemeButtons();
   resetGame();
   draw();
 })();
