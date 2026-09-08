@@ -4,6 +4,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ClaudeSnake 贪吃蛇</title>
+<script>
+  // 刷新后保持上次选定的配色风格：在首屏绘制前就把 data-theme 定好，
+  // 否则会先闪一下标记里默认的磷光绿，再跳到上次选的风格。
+  (function () {
+    try {
+      var saved = localStorage.getItem('claudesnake-theme');
+      if (saved === 'green' || saved === 'neon') {
+        document.documentElement.dataset.theme = saved;
+      }
+    } catch (e) { /* 存储不可用（隐私模式等）时沿用标记里的默认主题 */ }
+  })();
+</script>
 <style>
   /* ---------- 主题变量 ----------
      两套风格各定义一套变量，按钮 / 画布 / 页面底色只写一次规则；
@@ -192,6 +204,25 @@
   const GLOW_BLUR = 12;   // 蛇身 / 蛇头辉光半径
   const GRID_BLUR = 6;    // 网格线辉光半径（仅霓虹风）
 
+  // ---------- 风格持久化 ----------
+  const THEME_KEY = 'claudesnake-theme';   // 记录所选风格的 localStorage 键
+
+  // 读取上次选定的风格；存储不可用或值非法时回落默认的 green
+  function readSavedTheme() {
+    try {
+      const saved = localStorage.getItem(THEME_KEY);
+      if (saved === 'green' || saved === 'neon') return saved;
+    } catch (e) { /* 隐私模式等场景下 localStorage 可能抛异常，忽略 */ }
+    return 'green';
+  }
+
+  // 保存选定的风格，供下次打开 / 刷新时恢复
+  function saveTheme(name) {
+    try {
+      localStorage.setItem(THEME_KEY, name);
+    } catch (e) { /* 存储不可用时不影响游戏本身 */ }
+  }
+
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
 
@@ -207,7 +238,9 @@
   let games = 0;         // 局数（新一局不清零）
   let timer = null;
   let mode = 'solo';   // 操控模式：'solo' = WASD 人工操控，'ai' = AI 全权操控
-  let themeName = 'green'; // 当前配色主题：'green' = 磷光绿（默认），'neon' = 霓虹风
+  // 当前配色主题：'green' = 磷光绿（默认），'neon' = 霓虹风。
+  // 初值取上次选定的风格，刷新后保持。
+  let themeName = readSavedTheme();
 
   // ---------- 工具 ----------
   function cellRect(c) {
@@ -631,6 +664,7 @@
     if (name === themeName) return; // 已经是该风格：不响应，也不重绘
     themeName = name;
     applyTheme();
+    saveTheme(name); // 记住这次选择，刷新 / 下次打开时恢复
     syncThemeButtons();
     draw();
   }
