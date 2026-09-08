@@ -35,6 +35,11 @@
     --btn-active-ring: 0 0 0 1px #3DFF9E, 0 0 14px rgba(61, 255, 158, 0.45);
     --canvas-radius: 0;
     --canvas-shadow: 0 0 40px rgba(61, 255, 158, 0.18);
+    --panel-bg: #08120C;                                  /* 记录面板底色（不透明，避免棋盘文字透出） */
+    --panel-border: #1E4634;
+    --panel-fg: #C9FFE2;
+    --panel-dim: #6FC79A;
+    --panel-accent: #3DFF9E;
   }
   :root[data-theme="neon"] {
     --page-bg: #12061F;                                   /* 页面底色：深紫罗兰 */
@@ -51,6 +56,11 @@
     --btn-active-ring: 0 0 0 2px #5CE1E6, 0 0 18px rgba(92, 225, 230, 0.60); /* 青色描边，与品红对比 */
     --canvas-radius: 14px;
     --canvas-shadow: 0 0 40px rgba(255, 79, 216, 0.25), 0 0 80px rgba(92, 225, 230, 0.15);
+    --panel-bg: #16082B;                                  /* 记录面板底色（不透明，避免棋盘文字透出） */
+    --panel-border: #FF4FD8;
+    --panel-fg: #FFE3FB;
+    --panel-dim: #B98FD9;
+    --panel-accent: #5CE1E6;
   }
 
   html, body {
@@ -95,6 +105,70 @@
     right: 16px;
     bottom: 16px;
   }
+  /* 「记录」按钮：紧贴「重置」正上方（重置按钮实测高 53px，留 8px 间隔） */
+  #history-btn {
+    position: absolute;
+    right: 16px;
+    bottom: 77px;
+  }
+  /* 记录面板：居中盖在棋盘上，打开时暂停游戏，关闭时继续 */
+  #history-panel {
+    display: none;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    min-width: 340px;
+    padding: 18px 22px 20px;
+    background: var(--panel-bg);
+    border: 2px solid var(--panel-border);
+    border-radius: var(--btn-radius);
+    box-shadow: var(--btn-shadow-hover);
+    color: var(--panel-fg);
+    font-family: var(--btn-font);
+  }
+  #history-panel.show { display: block; }
+  /* 面板打开时压住模式 / 风格按钮，避免两层控件叠在一起 */
+  #history-panel.show ~ #mode-box { display: none; }
+  .hp-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 14px;
+    font-size: 20px;
+    font-weight: bold;
+    color: var(--panel-accent);
+  }
+  #history-close {
+    font-size: 16px;
+    padding: 2px 10px;
+  }
+  #history-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 7px;
+    font-size: 17px;
+  }
+  /* 每行四列：局数（占满剩余）| 得分 | 结果 | 模式，后三列右对齐成表 */
+  #history-list li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  #history-list li span:nth-child(1) { flex: 1; }
+  #history-list li span:nth-child(2) { width: 4.5em; text-align: right; }
+  #history-list li span:nth-child(3) { width: 3.5em; text-align: right; }
+  #history-list li span:nth-child(4) { width: 3em; text-align: right; color: var(--panel-dim); }
+  /* 通关的那一局，结果一列用强调色标出来 */
+  #history-list li.win span:nth-child(3) { color: var(--panel-accent); font-weight: bold; }
+  #history-list .history-empty {
+    justify-content: center;
+    color: var(--panel-dim);
+    padding: 10px 0;
+  }
   /* 模式选择按钮：位于 WASD 提示文字下方，仅非游戏状态显示 */
   #mode-box {
     position: absolute;
@@ -125,6 +199,14 @@
 <div id="stage">
   <canvas id="game" width="800" height="800"></canvas>
   <button id="reset-btn" class="snake-btn" type="button">重置</button>
+  <button id="history-btn" class="snake-btn" type="button">记录</button>
+  <div id="history-panel">
+    <div class="hp-head">
+      <span>最近 10 局</span>
+      <button id="history-close" class="snake-btn" type="button">关闭</button>
+    </div>
+    <ul id="history-list"></ul>
+  </div>
   <div id="mode-box">
     <div id="mode-row">
       <button id="solo-btn" class="snake-btn" type="button">独自游玩</button>
@@ -152,6 +234,7 @@
   const STATE = { WELCOME: 'welcome', PLAYING: 'playing', OVER: 'over', WIN: 'win' };
   const DIRS = { w: 'up', s: 'down', a: 'left', d: 'right' };
   const OPPOSITE = { up: 'down', down: 'up', left: 'right', right: 'left' };
+  const HISTORY_MAX = 10;         // 记录面板最多保留的局数
 
   // ---------- 配色主题 ----------
   // 两套主题共用同一套绘制逻辑，只有颜色不同；默认 phosphor green。
@@ -238,6 +321,8 @@
   let games = 0;         // 局数（新一局不清零）
   let timer = null;
   let mode = 'solo';   // 操控模式：'solo' = WASD 人工操控，'ai' = AI 全权操控
+  let history = [];    // 最近 10 局记录，新的在前：{ no, score, win, mode }
+  let paused = false;  // 记录面板打开时为 true（仅游戏进行中有意义）
   // 当前配色主题：'green' = 磷光绿（默认），'neon' = 霓虹风。
   // 初值取上次选定的风格，刷新后保持。
   let themeName = readSavedTheme();
@@ -336,6 +421,7 @@
   function endGame(win) {
     state = win ? STATE.WIN : STATE.OVER;
     stopTimer();
+    recordResult(win); // 本局结果计入「最近 10 局」
     draw(); // 不输出死亡原因，分数保留
   }
 
@@ -454,6 +540,8 @@
 
   function startGame(m) {
     if (m === 'solo' || m === 'ai') mode = m; // 不传模式则沿用当前模式（如「重置」按钮重开）
+    paused = false;                           // 新一局不继承面板的暂停态
+    closeHistory();                           // 新一局开始：收起记录面板
     state = STATE.PLAYING;
     games++; // 每开始一局，局数 +1
     stopTimer();
@@ -593,6 +681,7 @@
   // ---------- 键盘 ----------
   function onKeyDown(e) {
     if (state !== STATE.PLAYING) return; // 开始 / 重新开局均由模式按钮完成，空格键已移除
+    if (paused) return;                  // 记录面板打开（已暂停）时忽略按键
 
     const key = e.key.toLowerCase();
     if (mode === 'solo' && DIRS.hasOwnProperty(key)) {
@@ -617,6 +706,9 @@
     totalScore = 0;
     highScore = 0;
     games = 0;
+    history = [];          // 记录一并清空，与「局数归零」保持一致
+    paused = false;        // 解除面板暂停态
+    closeHistory();        // 收起记录面板
     stopTimer();           // 游戏中点击时先停掉计时器
     state = STATE.WELCOME; // 回到主菜单
     resetGame();           // 复位棋盘、蛇身与食物
@@ -626,6 +718,87 @@
   resetBtn.addEventListener('click', function () {
     resetAll();
     this.blur(); // 点击后移除焦点，避免之后按回车 / 空格误触发按钮
+  });
+
+  // ---------- 「记录」按钮与最近 10 局 ----------
+  const historyBtn = document.getElementById('history-btn');
+  const historyPanel = document.getElementById('history-panel');
+  const historyClose = document.getElementById('history-close');
+  const historyList = document.getElementById('history-list');
+
+  // 记录本局结果，只保留最近 HISTORY_MAX 局，新的排在最前。
+  // 撞墙 / 撞自己 / 按 P / 通关都会经过 endGame 走到这里；
+  // 中途点「重置」走的是 resetAll，不经过 endGame，因此不会被记录。
+  function recordResult(win) {
+    history.unshift({ no: games, score: score, win: win, mode: mode });
+    if (history.length > HISTORY_MAX) history.pop();
+    renderHistory();
+  }
+
+  // 把记录渲染进面板；一条都没有时显示占位文字
+  function renderHistory() {
+    historyList.innerHTML = '';
+    if (history.length === 0) {
+      const li = document.createElement('li');
+      li.className = 'history-empty';
+      li.textContent = '暂无记录';
+      historyList.appendChild(li);
+      return;
+    }
+    for (const h of history) {
+      const li = document.createElement('li');
+      if (h.win) li.className = 'win';
+      const cells = [
+        '第 ' + h.no + ' 局',
+        h.score + ' 分',
+        h.win ? '通关' : '结束',
+        h.mode === 'ai' ? 'AI' : '独自'
+      ];
+      for (const text of cells) {
+        const span = document.createElement('span');
+        span.textContent = text;
+        li.appendChild(span);
+      }
+      historyList.appendChild(li);
+    }
+  }
+
+  // 面板打开时暂停，关闭时按原节奏继续（仅游戏进行中有意义）
+  function pauseGame() {
+    if (state !== STATE.PLAYING || paused) return;
+    paused = true;
+    stopTimer();
+  }
+
+  function resumeGame() {
+    if (!paused) return;
+    paused = false;
+    if (state === STATE.PLAYING) {
+      stopTimer(); // 防御：确保不会同时存在两个计时器
+      timer = setInterval(tick, TICK_MS);
+    }
+  }
+
+  function openHistory() {
+    renderHistory();
+    historyPanel.classList.add('show');
+    pauseGame();
+  }
+
+  function closeHistory() {
+    historyPanel.classList.remove('show');
+    resumeGame();
+  }
+
+  historyBtn.addEventListener('click', function () {
+    if (historyPanel.classList.contains('show')) closeHistory();
+    else openHistory();
+    this.blur(); // 点击后移除焦点，避免之后按回车 / 空格误触发按钮
+  });
+
+  historyClose.addEventListener('click', function () {
+    closeHistory();
+    this.blur();
   });
 
   // ---------- 「独自游玩」/「AI游玩」按钮 ----------
