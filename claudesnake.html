@@ -481,16 +481,16 @@
   // ---------- 「重置」按钮 ----------
   const resetBtn = document.getElementById('reset-btn');
 
+  // 「重置」：无论当前处于游戏中还是结束界面，一律回到主菜单
+  // （主菜单 = 欢迎界面，可在此选择配色风格与游玩方式）
   function resetAll() {
     totalScore = 0;
     highScore = 0;
     games = 0;
-    if (state === STATE.PLAYING) {
-      restartGame(); // 游戏中点击：清零记录并重新开始本局
-    } else {
-      resetGame();   // 欢迎 / 结束界面点击：清零记录并复位棋盘
-      draw();
-    }
+    stopTimer();           // 游戏中点击时先停掉计时器
+    state = STATE.WELCOME; // 回到主菜单
+    resetGame();           // 复位棋盘、蛇身与食物
+    draw();
   }
 
   resetBtn.addEventListener('click', function () {
