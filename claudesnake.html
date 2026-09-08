@@ -146,7 +146,8 @@
   const THEMES = {
     // 磷光绿 CRT：深墨绿底 + 单色磷光绿，网格刻意压低对比
     green: {
-      canvasBg: '#08120C',                 // 画布底色
+      canvasBg: '#08120C',                 // 画布底色（棋盘浅格）
+      gridDark: '#0C1B13',                 // 棋盘深格（与浅格交错）
       grid: 'rgba(61, 255, 158, 0.12)',    // 网格线
       gridGlow: null,                      // 网格辉光（磷光绿不加）
       border: '#1E4634',                   // 地图外框
@@ -168,6 +169,7 @@
     // 霓虹风（蒸汽波）：深紫罗兰底 + 发光青色网格 + 品红蛇身
     neon: {
       canvasBg: '#16082B',
+      gridDark: '#1F0E38',
       grid: 'rgba(92, 225, 230, 0.22)',
       gridGlow: 'rgba(92, 225, 230, 0.55)', // 网格主动发光，是这套风格的核心
       border: '#FF4FD8',
@@ -221,6 +223,35 @@
     ctx.arcTo(x, y, x + w, y, r);
     ctx.closePath();
     ctx.fill();
+  }
+
+  // 每节顶部的内高光：半透明白色细条，让蛇身有节段立体感。
+  // 用半透明白叠加而非另算颜色，效果等同于把该节颜色向白色提亮。
+  function highlightSegment(x, y) {
+    ctx.shadowBlur = 0;                            // 高光本身不发光
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(x + 3, y + 3, CELL_SIZE - 6, 2);
+    ctx.globalAlpha = 1;
+  }
+
+  // 蛇眼：两个与画布底色同色的圆点，按当前朝向摆在蛇头前端的两个角上
+  function drawEyes(cx, cy, d) {
+    const px = OFFSET + cx * CELL_SIZE;
+    const py = OFFSET + cy * CELL_SIZE;
+    const m = Math.round(CELL_SIZE * 0.22);        // 眼睛距格边的距离
+    const r = Math.max(1.5, CELL_SIZE * 0.09);     // 眼睛半径
+    let e1, e2;
+    if (d === 'right')     { e1 = [px + CELL_SIZE - m, py + m]; e2 = [px + CELL_SIZE - m, py + CELL_SIZE - m]; }
+    else if (d === 'left') { e1 = [px + m, py + m];             e2 = [px + m, py + CELL_SIZE - m]; }
+    else if (d === 'down') { e1 = [px + m, py + CELL_SIZE - m]; e2 = [px + CELL_SIZE - m, py + CELL_SIZE - m]; }
+    else                   { e1 = [px + m, py + m];             e2 = [px + CELL_SIZE - m, py + m]; }
+    ctx.fillStyle = THEMES[themeName].canvasBg;
+    for (const e of [e1, e2]) {
+      ctx.beginPath();
+      ctx.arc(e[0], e[1], r, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   // 十六进制颜色线性插值，用于蛇身「头亮尾暗」的渐变
@@ -427,6 +458,16 @@
     ctx.fillStyle = theme.canvasBg;
     ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
+    // 棋盘格：底色为浅格，深格铺在 (x+y) 为偶数的格子上，形成深浅交错
+    ctx.fillStyle = theme.gridDark;
+    for (let gx = 0; gx < COLS; gx++) {
+      for (let gy = 0; gy < ROWS; gy++) {
+        if (((gx + gy) & 1) === 0) {
+          ctx.fillRect(OFFSET + gx * CELL_SIZE, OFFSET + gy * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+        }
+      }
+    }
+
     // 网格线（霓虹风的网格主动发光，是该风格的核心符号）
     if (theme.gridGlow) {
       ctx.shadowColor = theme.gridGlow;
@@ -453,17 +494,19 @@
     ctx.lineWidth = 2;
     ctx.strokeRect(OFFSET, OFFSET, GRID_SIZE, GRID_SIZE);
 
-    // 食物：30×30px，占满完整格子
+    // 食物：格子中心的圆，半径 0.3 格
     if (food !== null) {
       const [fx, fy] = cellRect(food);
       ctx.fillStyle = theme.food;
       ctx.shadowColor = theme.foodGlow;
       ctx.shadowBlur = 16;
-      ctx.fillRect(fx, fy, CELL_SIZE, CELL_SIZE);
+      ctx.beginPath();
+      ctx.arc(fx + CELL_SIZE / 2, fy + CELL_SIZE / 2, CELL_SIZE * 0.3, 0, Math.PI * 2);
+      ctx.fill();
       ctx.shadowBlur = 0;
     }
 
-    // 蛇身：30×30px，3px 圆角，由头到尾从亮渐暗
+    // 蛇身：30×30px，3px 圆角，由头到尾从亮渐暗，每节顶部带一道内高光
     const bodyCount = snake.length - 1;
     for (let i = bodyCount; i >= 1; i--) {
       const [bx, by] = cellRect(snake[i]);
@@ -472,16 +515,21 @@
       ctx.shadowColor = theme.glow;
       ctx.shadowBlur = GLOW_BLUR;
       roundRect(bx, by, CELL_SIZE, CELL_SIZE, 3);
+      highlightSegment(bx, by);
     }
     ctx.shadowBlur = 0;
 
-    // 蛇头：与蛇身尺寸一致，小圆角
+    // 蛇头：与蛇身尺寸一致，小圆角，同样带内高光
     const [hx, hy] = cellRect(snake[0]);
     ctx.fillStyle = theme.head;
     ctx.shadowColor = theme.glow;
     ctx.shadowBlur = GLOW_BLUR;
     roundRect(hx, hy, CELL_SIZE, CELL_SIZE, 3);
     ctx.shadowBlur = 0;
+    highlightSegment(hx, hy);
+
+    // 蛇眼：画在蛇头内高光之上
+    drawEyes(snake[0][0], snake[0][1], dir);
 
     // 覆盖层：欢迎 / 结束 / 胜利
     if (state === STATE.WELCOME) {
