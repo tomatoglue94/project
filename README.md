@@ -1,6 +1,9 @@
 # 集协项目
 
 ## 目录
+### 个人资料
+- [个人网页](#个人网页)
+- [pdf版简介](#pdf版简介)
 ### 贪吃蛇
 - [前言](#前言)
 - [防“纯粘贴”承诺](#防纯粘贴承诺)
@@ -18,6 +21,16 @@
 - [验证戴维南定理](#验证戴维南定理)
 - [NMOS放大电路](#NMOS放大电路)
 - [AI使用情况](#AI使用情况)
+
+
+# 个人资料
+## 个人网页
+网站地址：https://tomatoglue94.github.io/personal-website/
+网站仓库地址：https://github.com/tomatoglue94/personal-website
+
+## pdf版简介
+- [查看简介](个人简介.pdf)
+
 
 # 贪吃蛇
 
